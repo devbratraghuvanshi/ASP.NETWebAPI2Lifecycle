@@ -1,0 +1,196 @@
+
+1:- IIS (or OWIN self-hosting) receives a request.
+2:- The request is then passed to an instance of HttpServer.
+
+HttpServer
+https://msdn.microsoft.com/en-us/library/system.web.http.httpserver(v=vs.118).aspx
+
+3:- HttpServer is responsible for dispatching HttpRequestMessage objects.
+4:- HttpRequestMessage provides strongly-typed access to the request.
+
+5:- If one or more global instances of DelegatingHandler exist on the pipeline, the request is passed to it.
+    The request arrives at the instances of DelegatingHandler in the order said instances were added to
+    the pipeline.
+
+    DelegatingHandler instances can skip the remainder of the pipeline and create their own response.
+
+Example:- 
+https://www.exceptionnotfound.net/custom-validation-in-asp-net-web-api-with-fluentvalidation/
+
+
+6:- If the HttpRequestMessage passes the DelegatingHandler instances (or no such handler exists), then 
+    the request proceeds to the HttpRoutingDispatcher instance.
+https://docs.microsoft.com/en-us/previous-versions/aspnet/jj126961(v=vs.118)
+
+    A: HttpRoutingDispatcher chooses which routing handler to call based on the matching route.
+    B: if no such route exists (e.g. Route.Handler is null, as seen in the diagram) then the 
+    request proceeds directly to Step 10 => The request is received by an instance of HttpControllerDispatcher.
+
+7:- If a Route Handler exists for the given route, the HttpRequestMessage is sent to that handler.
+
+8:- It is possible to have instances of DelegatingHandler attached to individual routes. 
+    If such handlers exist, the request goes to them (in the order they were added to the pipeline).
+
+    Instances of DelegatingHandler attached to individual routes
+    https://docs.microsoft.com/en-us/aspnet/web-api/overview/advanced/http-message-handlers
+
+   For Note:  public abstract class DelegatingHandler : HttpMessageHandler
+              public class CustomHeaderHandler : DelegatingHandler
+
+9:- An instance of HttpMessageHandler then handles the request. If you provide a custom HttpMessageHandler, 
+    said handler can optionally return the request to the "main" path or to a custom end point.
+
+    HttpMessageHandler
+    https://docs.microsoft.com/en-us/previous-versions/visualstudio/hh138091(v=vs.118)
+
+10:- The request is received by an instance of HttpControllerDispatcher, which will route the request
+     to the appropriate route as determined by the request's URL.
+
+    HttpControllerDispatcher
+    https://docs.microsoft.com/en-us/previous-versions/aspnet/hh835303(v=vs.118)
+
+    Note:
+    public class HttpControllerDispatcher : HttpMessageHandler
+
+11:- The HttpControllerDispatcher selects the appropriate controller to route the request to.
+
+12:- An instance of IHttpControllerSelector selects the appropriate HttpControllerDescriptor for 
+    the given HttpMessage.
+
+13:- The IHttpControllerSelector calls an instance of IHttpControllerTypeResolver, which will finally call.
+
+14:- an instance of IAssembliesResolver, which ultimately selects the appropriate controller and returns it 
+    to the HttpControllerDispatcher from Step 11.
+
+    NOTE: If you implement Dependency Injection, the IAssembliesResolver will be replaced 
+    by whatever container you register.
+
+15:- Once the HttpControllerDispatcher has a reference to the appropriate controller, it calls the 
+     Create() method on an IHttpControllerActivator...
+
+     IHttpControllerActivator
+     https://docs.microsoft.com/en-us/previous-versions/aspnet/hh834502(v=vs.118)
+
+16:- ..which creates the actual controller and returns it to the Dispatcher. 
+    The dispatcher then sends the request into the Select Controller Action routine, as shown below.
+
+17:- We now have an instance of ApiController which represents the actual controller class the request 
+    is routed to. Said instance calls the SelectAction() method on IHttpActionSelector...
+
+    ApiController
+    https://docs.microsoft.com/en-us/dotnet/api/system.web.http.apicontroller?view=aspnetcore-2.2
+
+    IHttpActionSelector
+    https://docs.microsoft.com/en-us/previous-versions/aspnet/hh834302(v=vs.118)
+
+18:- ...which returns an instance of HttpActionDescriptor representing the action that needs to be called.
+
+    HttpActionDescriptor
+    https://docs.microsoft.com/en-us/previous-versions/aspnet/hh834302(v=vs.118)
+
+19:- Once the pipeline has determined which action to route the request to, it executes any Authentication 
+    Filters which are inserted into the pipeline (either globally or local to the invoked action).
+
+    Authentication Filters
+    https://docs.microsoft.com/en-us/aspnet/web-api/overview/security/authentication-filters
+
+    These filters allow you to authenticate requests to either individual actions, entire controllers, 
+    or globally throughout the application. Any filters which exist are executed in the order they are 
+    added to the pipeline (global filters first, then controller-level filters, then action-level filters).
+
+20:- The request then proceeds to the [Authorization Filters] layer, 
+      where any Authorization Filters which exist are applied to the request.
+
+        Authorization Filters can optionally create their own response and send that back, rather 
+        than allowing the request to proceed through the pipeline. These filters are applied in the 
+        same manner as Authentication Filters (globally, controller-level, action-level). 
+        Note that Authorization Filters can only be used on the Request, not the Response, 
+        as it is assumed that if a Response exists, the user had the authorization to generate it.
+
+21:- The request now enters the Model Binding process,Each parameter needed by the action can be bound to its value by one of three separate paths. 
+     Which path the binding system uses depends on where the value needed exists within the request.
+
+22:- If data needed for an action parameter value exists in the entity body, Web API reads the body of the request; an instance of 
+        FormatterParameterBinding will invoke the appropriate formatter classes...
+        
+        FormatterParameterBinding
+        https://msdn.microsoft.com/en-us/library/system.web.http.modelbinding.formatterparameterbinding(v=vs.118).aspx
+
+23:- ...which bind the values to a media type (using MediaTypeFormatter)...
+        MediaTypeFormatter
+        https://docs.microsoft.com/en-us/previous-versions/aspnet/hh834436(v=vs.118)
+
+24:- ...which results in a new complex type.
+
+ 
+
+25:- If data needed for a parameter value exists in the URL or query string, said URL is passed into an instance of IModelBinder,
+        which uses an IValueProvider to map values to a model (see Phil Haack's post about this topic for more info)....
+        IModelBinder
+        https://docs.microsoft.com/en-us/previous-versions/aspnet/hh835816(v=vs.118)
+        
+        IValueProvider
+        https://docs.microsoft.com/en-us/previous-versions/aspnet/hh835990(v=vs.118)
+        
+        for more info
+        https://haacked.com/archive/2011/06/30/whatrsquos-the-difference-between-a-value-provider-and-model-binder.aspx/
+
+26:- ...which results in a simple type.
+
+
+27:- If a custom HttpParameterBinding exists, the system uses that custom binding to build the value...
+        HttpParameterBinding
+        https://docs.microsoft.com/en-us/previous-versions/aspnet/hh944852(v=vs.118)
+
+28:- ...which results in any kind (simple or complex) of object being mappable
+        How WebAPI does Parameter Binding
+        https://blogs.msdn.microsoft.com/jmstall/2012/04/16/how-webapi-does-parameter-binding/
+
+ 
+
+29:- Now that the request is bound to a model, it is passed through any Action Filters which may exist in the pipeline
+        (either globally or just for the action being invoked).
+        Action filters
+        https://www.strathweb.com/2015/06/action-filters-service-filters-type-filters-asp-net-5-mvc-6/
+
+30:- Once the action filters are passed, the action itself is invoked, and the system waits for a response from it.
+
+ 
+
+31:- If the action produces an exception AND an exception filter exists, the exception filter receives and processes the exception.
+        exception filters
+        https://www.exceptionnotfound.net/the-asp-net-web-api-exception-handling-pipeline-a-guided-tour/
+
+32:- If no exception occurred, the action produces an instance of HttpResponseMessage by running the Result Conversion subroutine
+
+33:- If the return type is already an HttpResponseMessage, we don't need to do any conversion, so pass the return on through.
+
+34:- If the return type is void, .NET will return an HttpResponseMessage with the status 204 No Content.
+
+
+35:- If the return type is an IHttpActionResult, call the method ExecuteAsync to create an HttpResponseMessage.
+        IHttpActionResult
+        https://www.asp.net/web-api/overview/getting-started-with-aspnet-web-api/action-results
+
+        In any Web API method in which you use return Ok(); or return BadRequest(); or something similar,
+        that return statement follows this process, rather than any of the other processes, since the return
+        type of those actions is IHttpActionResult.
+
+36:- For all other types, .NET will create an HttpResponseMessage and place the serialized value of the return in the body of that message.
+
+37:- Once the HttpResponseMessage has been created, return it to the main pipeline.
+
+38:- Pass the newly-created HttpResponseMessage through any AuthenticationFilters which may exist.
+    Remember that Authorization Filters cannot be used on Responses.
+
+39:- The HttpResponseMessage flows through the HttpControllerDispatcher, which at this point probably won't do anything with it.
+
+40:- The Response also flows through the HttpRoutingDispatcher, which again won't do anything with it.
+
+41:- The Response now proceeds through any DelegatingHandlers that are set up to handle it. At this point,
+        the DelegatingHandler objects can really only change the response being sent
+        e.g. intercept certain responses and change to the appropriate HTTP status
+
+42:- The final HttpResponseMessage is given to the HttpServer instance...
+
+43:- ...which returns an Http response to the invoking client.
